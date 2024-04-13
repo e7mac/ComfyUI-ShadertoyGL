@@ -1,11 +1,53 @@
 import numpy as np
 import os
 import OpenGL.GL as gl
+import sys
+from ctypes import *
+
+# Load the OpenGL framework
+framework = CDLL("/System/Library/Frameworks/OpenGL.framework/OpenGL")
+
+# Define CGL function prototypes
+CGLChoosePixelFormat = framework.CGLChoosePixelFormat
+CGLChoosePixelFormat.argtypes = [POINTER(c_int), POINTER(c_int), POINTER(c_int)]
+CGLChoosePixelFormat.restype = c_void_p
+
+CGLCreateContext = framework.CGLCreateContext
+CGLCreateContext.argtypes = [c_void_p, c_void_p]
+CGLCreateContext.restype = c_void_p
+
+CGLSetCurrentContext = framework.CGLSetCurrentContext
+CGLSetCurrentContext.argtypes = [c_void_p]
+CGLSetCurrentContext.restype = c_int
+
+CGLDestroyContext = framework.CGLDestroyContext
+CGLDestroyContext.argtypes = [c_void_p]
+CGLDestroyContext.restype = None
+
+CGLDestroyPixelFormat = framework.CGLDestroyPixelFormat
+CGLDestroyPixelFormat.argtypes = [c_void_p]
+CGLDestroyPixelFormat.restype = None
+
+# Define CGL constants
+kCGLPFAOpenGLProfile = 99
+kCGLOGLPVersion_3_2_Core = 0x3200
+kCGLPFAColorSize = 8
+kCGLPFAAlphaSize = 11
+kCGLPFADoubleBuffer = 5
+kCGLPFASampleBuffers = 55
+kCGLPFASamples = 56
+kCGLPFAAccelerated = 73
+kCGLPFANoRecovery = 72
+kCGLPFABackingStore = 76
+kCGLPFASupportsAutomaticGraphicsSwitching = 101
 
 class ShadertoyGLContext:
     def __init__(self):
+        self.is_mac = sys.platform.startswith("darwin")
         self.headless = os.name == "posix" and os.environ.get("DISPLAY", "") == ""
-        if self.headless:
+        if self.is_mac:
+            a = 5
+        elif self.headless:
             os.environ["PYOPENGL_PLATFORM"] = "egl"
             import OpenGL.EGL as egl
             self.egl = egl
@@ -14,7 +56,34 @@ class ShadertoyGLContext:
             self.glfw = glfw
 
     def render_surface_and_context_init(self, width, height):
-        if self.headless:
+        if self.is_mac:
+            attributes = [
+                kCGLPFAOpenGLProfile, kCGLOGLPVersion_3_2_Core,
+                kCGLPFAColorSize, 24,
+                kCGLPFAAlphaSize, 8,
+                kCGLPFADoubleBuffer,
+                kCGLPFASampleBuffers, 1,
+                kCGLPFASamples, 4,
+                kCGLPFAAccelerated,
+                kCGLPFANoRecovery,
+                kCGLPFABackingStore,
+                kCGLPFASupportsAutomaticGraphicsSwitching,
+                0
+            ]
+
+            attributes_array = (c_int * len(attributes))(*attributes)
+            pixel_format = c_void_p(CGLChoosePixelFormat(attributes_array, None, None))
+            if pixel_format.value is None:
+                raise RuntimeError("No suitable CGL pixel format found")
+
+            context = c_void_p(CGLCreateContext(pixel_format, None))
+            if context.value is None:
+                raise RuntimeError("Unable to create CGL context")
+
+            CGLSetCurrentContext(context)
+
+            return {"context": context, "pixel_format": pixel_format}
+        elif self.headless:
             egl_display = self.egl.eglGetDisplay(self.egl.EGL_DEFAULT_DISPLAY)
             if egl_display == self.egl.EGL_NO_DISPLAY:
                 raise RuntimeError("No EGL display connection available")
@@ -68,7 +137,11 @@ class ShadertoyGLContext:
             return {}
 
     def render_surface_and_context_deinit(self, **kwargs):
-        if self.headless:
+        if self.is_mac:
+            CGLSetCurrentContext(None)
+            CGLDestroyContext(context)
+            CGLDestroyPixelFormat(pixel_format)
+        elif self.headless:
             self.egl.eglMakeCurrent(kwargs["egl_display"], self.egl.EGL_NO_SURFACE, self.egl.EGL_NO_SURFACE, self.egl.EGL_NO_CONTEXT)
             self.egl.eglDestroySurface(kwargs["egl_display"], kwargs["egl_surface"])
             self.egl.eglDestroyContext(kwargs["egl_display"], kwargs["egl_context"])
@@ -130,8 +203,11 @@ class ShadertoyGLContext:
         return (ctx, fbo, shader, textures)
 
     def render_resources_cleanup(self, ctx):
-        # assume all other resources get cleaned up with the context
-        self.render_surface_and_context_deinit(**ctx)
+        if self.is_mac:
+            self.render_surface_and_context_deinit(ctx["context"], ctx["pixel_format"])
+        else:
+            # assume all other resources get cleaned up with the context
+            self.render_surface_and_context_deinit(**ctx)
 
     def render(self, width, height, fbo, shader):
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
