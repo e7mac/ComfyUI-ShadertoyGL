@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-shadertoygl"
+description = "Nodes:Shadertoy, Shader, ColorChannelOffset."
+version = "1.0.0"
+license = "LICENSE"
+dependencies = ["glfw", "PyOpenGL", "PyOpenGL-accelerate"]
+
+[project.urls]
+Repository = "https://github.com/e7mac/ComfyUI-ShadertoyGL"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-ShadertoyGL"
+Icon = ""
